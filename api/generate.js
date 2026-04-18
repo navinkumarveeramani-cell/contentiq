@@ -9,7 +9,6 @@ const CORS = {
 export default async function handler(req) {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
 
-  // Password check
   const password = req.headers.get("x-app-password") || "";
   const correct  = process.env.APP_PASSWORD || "";
   if (password !== correct) {
@@ -18,7 +17,6 @@ export default async function handler(req) {
     });
   }
 
-  // Daily limit
   const limit      = parseInt(process.env.DAILY_LIMIT || "20", 10);
   const usageDate  = req.headers.get("x-usage-date") || "";
   const usageCount = parseInt(req.headers.get("x-usage-count") || "0", 10);
@@ -39,7 +37,8 @@ export default async function handler(req) {
     contents: [{ role: "user", parts: [{ text: userMessage }] }],
     generationConfig: {
       maxOutputTokens: 8192,
-      temperature: 0.3,
+      temperature: 0.2,
+      responseMimeType: "application/json",  // Force pure JSON output
     },
   };
 
@@ -68,6 +67,7 @@ export default async function handler(req) {
       ?.map(p => p.text)
       ?.join("") || "";
 
+    // Return in format App.jsx expects
     return new Response(
       JSON.stringify({ content: [{ type: "text", text }] }),
       { status: 200, headers: { ...CORS, "Content-Type": "application/json" } }
