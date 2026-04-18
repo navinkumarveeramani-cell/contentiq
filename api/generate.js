@@ -105,7 +105,7 @@ export default async function handler(req) {
       parts: [{ text: `${ANALYSIS_PROMPT}\n\nContent to analyse:\n\n${userContent}\n\nReturn only the JSON object:` }]
     }],
     generationConfig: {
-      maxOutputTokens: 4096,
+      maxOutputTokens: 8192,
       temperature: 0.1,
     },
   };
