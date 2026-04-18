@@ -767,17 +767,36 @@ function MainApp({ password }) {
         .replace(/\s*```$/i, "")
         .trim();
 
-      let parsed;
-      try {
-        parsed = JSON.parse(cleaned);
-      } catch {
-        const match = cleaned.match(/\{[\s\S]*\}/);
-        if (!match) {
-          setError("Gemini returned unexpected content: " + cleaned.slice(0, 300));
-          setLoading(false); setStatus(""); return;
-        }
-        parsed = JSON.parse(match[0]);
-      }
+     let parsed;
+try {
+  parsed = JSON.parse(cleaned);
+} catch {
+  // Try to extract JSON even if slightly truncated
+  const match = cleaned.match(/\{[\s\S]*/);
+  if (!match) {
+    setError("Gemini returned unexpected content: " + cleaned.slice(0, 300));
+    setLoading(false); setStatus(""); return;
+  }
+  // Attempt to close any open JSON
+  let attempt = match[0];
+  try {
+    parsed = JSON.parse(attempt);
+  } catch {
+    // Count and close any unclosed braces/brackets
+    let open = 0;
+    for (const ch of attempt) {
+      if (ch === "{" || ch === "[") open++;
+      if (ch === "}" || ch === "]") open--;
+    }
+    while (open > 0) { attempt += "}"; open--; }
+    try {
+      parsed = JSON.parse(attempt);
+    } catch {
+      setError("Response too large — please try with shorter content (under 500 words).");
+      setLoading(false); setStatus(""); return;
+    }
+  }
+}
 
       const newUsage = incrementUsage();
       setUsage(newUsage);
