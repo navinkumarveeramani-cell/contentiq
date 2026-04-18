@@ -9,26 +9,20 @@ const CORS = {
 export default async function handler(req) {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
 
+  // ── Password check ──────────────────────────────────────────
   const password = req.headers.get("x-app-password") || "";
   const correct  = process.env.APP_PASSWORD || "";
-
-  if (!correct) {
-    return new Response(JSON.stringify({ error: "APP_PASSWORD not set in Vercel environment variables" }), {
-      status: 500, headers: { ...CORS, "Content-Type": "application/json" },
-    });
-  }
-
   if (password !== correct) {
     return new Response(JSON.stringify({ error: "incorrect_password" }), {
       status: 401, headers: { ...CORS, "Content-Type": "application/json" },
     });
   }
 
+  // ── Daily limit check ───────────────────────────────────────
   const limit      = parseInt(process.env.DAILY_LIMIT || "20", 10);
   const usageDate  = req.headers.get("x-usage-date") || "";
   const usageCount = parseInt(req.headers.get("x-usage-count") || "0", 10);
   const todayDate  = new Date().toISOString().slice(0, 10);
-
   if (usageDate === todayDate && usageCount >= limit) {
     return new Response(JSON.stringify({
       error: "daily_limit_reached",
@@ -36,33 +30,39 @@ export default async function handler(req) {
     }), { status: 429, headers: { ...CORS, "Content-Type": "application/json" } });
   }
 
+  // ── Call Gemini ─────────────────────────────────────────────
   const body         = await req.json();
   const userMessage  = body.messages?.[0]?.content || "";
   const systemPrompt = body.system || "";
 
-  const geminiBody = {
+  const geminiRequest = {
     system_instruction: { parts: [{ text: systemPrompt }] },
     contents: [{ role: "user", parts: [{ text: userMessage }] }],
-    tools: [{ google_search: {} }],
-    generationConfig: { maxOutputTokens: 8192, temperature: 0.3 },
+    generationConfig: {
+      maxOutputTokens: 8192,
+      temperature: 0.3,
+      responseMimeType: "application/json",
+    },
   };
 
   try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+    const geminiRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent?key=${process.env.GEMINI_API_KEY}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(geminiBody),
+        body: JSON.stringify(geminiRequest),
       }
     );
 
-    const data = await response.json();
+    const data = await geminiRes.json();
 
-    if (!response.ok) {
-      return new Response(JSON.stringify({ error: "gemini_error", detail: data }), {
-        status: response.status, headers: { ...CORS, "Content-Type": "application/json" },
-      });
+    // Surface Gemini errors clearly
+    if (!geminiRes.ok) {
+      return new Response(
+        JSON.stringify({ error: "gemini_api_error", detail: data?.error?.message || JSON.stringify(data) }),
+        { status: 502, headers: { ...CORS, "Content-Type": "application/json" } }
+      );
     }
 
     const text = data.candidates?.[0]?.content?.parts
@@ -74,9 +74,10 @@ export default async function handler(req) {
       JSON.stringify({ content: [{ type: "text", text }] }),
       { status: 200, headers: { ...CORS, "Content-Type": "application/json" } }
     );
+
   } catch (err) {
     return new Response(
-      JSON.stringify({ error: "upstream_error", message: err.message }),
+      JSON.stringify({ error: "network_error", message: err.message }),
       { status: 502, headers: { ...CORS, "Content-Type": "application/json" } }
     );
   }
