@@ -9,7 +9,7 @@ const CORS = {
 export default async function handler(req) {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
 
-  // ── Password check ──────────────────────────────────────────
+  // Password check
   const password = req.headers.get("x-app-password") || "";
   const correct  = process.env.APP_PASSWORD || "";
   if (password !== correct) {
@@ -18,7 +18,7 @@ export default async function handler(req) {
     });
   }
 
-  // ── Daily limit check ───────────────────────────────────────
+  // Daily limit
   const limit      = parseInt(process.env.DAILY_LIMIT || "20", 10);
   const usageDate  = req.headers.get("x-usage-date") || "";
   const usageCount = parseInt(req.headers.get("x-usage-count") || "0", 10);
@@ -30,7 +30,6 @@ export default async function handler(req) {
     }), { status: 429, headers: { ...CORS, "Content-Type": "application/json" } });
   }
 
-  // ── Call Gemini ─────────────────────────────────────────────
   const body         = await req.json();
   const userMessage  = body.messages?.[0]?.content || "";
   const systemPrompt = body.system || "";
@@ -41,26 +40,25 @@ export default async function handler(req) {
     generationConfig: {
       maxOutputTokens: 8192,
       temperature: 0.3,
-      responseMimeType: "application/json",
     },
   };
 
+  const apiKey = process.env.GEMINI_API_KEY;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+
   try {
-    const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent?key=${process.env.GEMINI_API_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(geminiRequest),
-      }
-    );
+    const geminiRes = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(geminiRequest),
+    });
 
     const data = await geminiRes.json();
 
-    // Surface Gemini errors clearly
     if (!geminiRes.ok) {
+      const errMsg = data?.error?.message || JSON.stringify(data);
       return new Response(
-        JSON.stringify({ error: "gemini_api_error", detail: data?.error?.message || JSON.stringify(data) }),
+        JSON.stringify({ error: "gemini_error", message: errMsg }),
         { status: 502, headers: { ...CORS, "Content-Type": "application/json" } }
       );
     }
