@@ -733,9 +733,20 @@ function MainApp({ password }) {
       const data = await res.json();
       if (res.status===429||data.error==="daily_limit_reached") { setError(data.message||"Daily limit reached."); setLoading(false); setStatus(""); return; }
       if (res.status===401) { setError("Session expired — please sign out and sign in again."); setLoading(false); setStatus(""); return; }
-      const raw   = (data.content||[]).filter(c=>c.type==="text").map(c=>c.text||"").join("");
-      const match = raw.match(/\{[\s\S]*\}/);
-      if (!match) throw new Error("No JSON in response");
+      const cleaned = raw
+  .replace(/^```json\s*/i, "")
+  .replace(/^```\s*/i, "")
+  .replace(/\s*```$/i, "")
+  .trim();
+
+let parsed;
+try {
+  parsed = JSON.parse(cleaned);
+} catch {
+  const match = cleaned.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error("No JSON in response — raw: " + cleaned.slice(0, 200));
+  parsed = JSON.parse(match[0]);
+} 
       const parsed = JSON.parse(match[0]);
       const newUsage = incrementUsage();
       setUsage(newUsage);
