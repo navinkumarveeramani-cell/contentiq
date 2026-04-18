@@ -1,7 +1,7 @@
 // src/App.jsx — ContentIQ v3 with Password Gate + Daily Usage Limiter
 //
 // Set VITE_DAILY_LIMIT=10 in your Vercel env to control the daily cap shown in UI.
-// The actual enforcement happens server-side in api/anthropic.js.
+// The actual enforcement happens server-side in api/generate.js.
 
 import { useState, useEffect } from "react";
 
