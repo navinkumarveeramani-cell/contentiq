@@ -729,31 +729,65 @@ function MainApp({ password }) {
           messages:[{role:"user",content:`Analyse this content for SEO, AEO, GEO and LLM citation optimisation. Return only valid JSON:\n\n${content}`}],
         }),
       });
-      setStatus("Applying live strategies to your content...");
-      const data = await res.json();
-      if (res.status===429||data.error==="daily_limit_reached") { setError(data.message||"Daily limit reached."); setLoading(false); setStatus(""); return; }
-      if (res.status===401) { setError("Session expired — please sign out and sign in again."); setLoading(false); setStatus(""); return; }
-      const cleaned = raw
-  .replace(/^```json\s*/i, "")
-  .replace(/^```\s*/i, "")
-  .replace(/\s*```$/i, "")
-  .trim();
 
-let parsed;
-try {
-  parsed = JSON.parse(cleaned);
-} catch {
-  const match = cleaned.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error("No JSON in response — raw: " + cleaned.slice(0, 200));
-  parsed = JSON.parse(match[0]);
-} 
-      const parsed = JSON.parse(match[0]);
+      // Read as text first — never assume JSON
+      const rawResponse = await res.text();
+
+      // Try to parse as JSON
+      let data;
+      try {
+        data = JSON.parse(rawResponse);
+      } catch {
+        // Server returned plain text — show it so we can debug
+        setError("Server error: " + rawResponse.slice(0, 300));
+        setLoading(false); setStatus(""); return;
+      }
+
+      if (res.status === 429 || data.error === "daily_limit_reached") {
+        setError(data.message || "Daily limit reached.");
+        setLoading(false); setStatus(""); return;
+      }
+      if (res.status === 401) {
+        setError("Session expired — please sign out and sign in again.");
+        setLoading(false); setStatus(""); return;
+      }
+      if (data.error) {
+        setError("API error: " + (data.message || data.error));
+        setLoading(false); setStatus(""); return;
+      }
+
+      setStatus("Applying live strategies to your content...");
+
+      const raw = (data.content || []).filter(c => c.type === "text").map(c => c.text || "").join("");
+
+      // Strip markdown fences
+      const cleaned = raw
+        .replace(/^```json\s*/i, "")
+        .replace(/^```\s*/i, "")
+        .replace(/\s*```$/i, "")
+        .trim();
+
+      let parsed;
+      try {
+        parsed = JSON.parse(cleaned);
+      } catch {
+        const match = cleaned.match(/\{[\s\S]*\}/);
+        if (!match) {
+          setError("Gemini returned unexpected content: " + cleaned.slice(0, 300));
+          setLoading(false); setStatus(""); return;
+        }
+        parsed = JSON.parse(match[0]);
+      }
+
       const newUsage = incrementUsage();
       setUsage(newUsage);
       setResult(parsed);
       setTab("overview");
       saveToHistory(parsed, content);
-    } catch(e) { setError("Analysis failed — " + e.message); }
+
+    } catch(e) {
+      setError("Network error: " + e.message);
+    }
     setLoading(false); setStatus("");
   };
 
