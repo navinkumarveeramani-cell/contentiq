@@ -34,7 +34,7 @@ export default async function handler(req) {
 
   const strictPrompt = `${userMessage}
 
-CRITICAL: Return ONLY a valid JSON object. No markdown. No code fences. No explanation. Start with { and end with }.`;
+CRITICAL: Return ONLY a valid JSON object. No markdown. No code fences. No backticks. No explanation. Start your response with { and end with }.`;
 
   const geminiRequest = {
     system_instruction: { parts: [{ text: systemPrompt }] },
@@ -46,57 +46,55 @@ CRITICAL: Return ONLY a valid JSON object. No markdown. No code fences. No expla
   };
 
   const apiKey = process.env.GEMINI_API_KEY;
-  const models = ["gemini-1.5-flash", "gemini-1.5-pro"];
-  let lastError = "";
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
-  for (const model of models) {
+  try {
+    const geminiRes = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(geminiRequest),
+    });
+
+    const rawText = await geminiRes.text();
+
+    let data;
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-
-      const geminiRes = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(geminiRequest),
-      });
-
-      const rawText = await geminiRes.text();
-
-      let data;
-      try {
-        data = JSON.parse(rawText);
-      } catch {
-        lastError = `${model} returned non-JSON: ${rawText.slice(0, 200)}`;
-        continue;
-      }
-
-      if (!geminiRes.ok) {
-        lastError = data?.error?.message || `${model} error ${geminiRes.status}`;
-        continue;
-      }
-
-      const text = data.candidates?.[0]?.content?.parts
-        ?.filter(p => p.text)
-        ?.map(p => p.text)
-        ?.join("") || "";
-
-      if (!text) {
-        lastError = `${model} returned empty response`;
-        continue;
-      }
-
+      data = JSON.parse(rawText);
+    } catch {
       return new Response(
-        JSON.stringify({ content: [{ type: "text", text }] }),
-        { status: 200, headers: { ...CORS, "Content-Type": "application/json" } }
+        JSON.stringify({ error: "gemini_parse_error", message: rawText.slice(0, 300) }),
+        { status: 502, headers: { ...CORS, "Content-Type": "application/json" } }
       );
-
-    } catch (err) {
-      lastError = `${model} failed: ${err.message}`;
-      continue;
     }
-  }
 
-  return new Response(
-    JSON.stringify({ error: "all_models_failed", message: lastError }),
-    { status: 502, headers: { ...CORS, "Content-Type": "application/json" } }
-  );
+    if (!geminiRes.ok) {
+      return new Response(
+        JSON.stringify({ error: "gemini_error", message: data?.error?.message || geminiRes.status }),
+        { status: 502, headers: { ...CORS, "Content-Type": "application/json" } }
+      );
+    }
+
+    let text = data.candidates?.[0]?.content?.parts
+      ?.filter(p => p.text)
+      ?.map(p => p.text)
+      ?.join("") || "";
+
+    // ── Strip markdown code fences Gemini adds ──
+    text = text
+      .replace(/^```json\s*/i, "")
+      .replace(/^```\s*/i, "")
+      .replace(/\s*```$/i, "")
+      .trim();
+
+    return new Response(
+      JSON.stringify({ content: [{ type: "text", text }] }),
+      { status: 200, headers: { ...CORS, "Content-Type": "application/json" } }
+    );
+
+  } catch (err) {
+    return new Response(
+      JSON.stringify({ error: "network_error", message: err.message }),
+      { status: 502, headers: { ...CORS, "Content-Type": "application/json" } }
+    );
+  }
 }
