@@ -89,8 +89,8 @@ export default async function handler(req, res) {
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 8192,
+        model: "claude-haiku-4-5-20251001",
+max_tokens: 4000,
         messages: [{
           role: "user",
           content: `${ANALYSIS_PROMPT}\n\nContent to analyse:\n\n${userContent}\n\nReturn only the JSON object:`
