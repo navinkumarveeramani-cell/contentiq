@@ -692,7 +692,10 @@ function MainApp({ password }) {
   const [tab, setTab]         = useState("overview");
   const [history, setHistory] = useState([]);
   const [usage, setUsage]     = useState(getUsage);
-
+const [inputMode, setInputMode]   = useState("text");
+const [urlInput, setUrlInput]     = useState("");
+const [fetchingUrl, setFetchingUrl] = useState(false);
+const [fetchError, setFetchError] = useState(null);
   useEffect(() => {
     const keys  = Object.keys(localStorage).filter(k=>k.startsWith("analysis:"));
     const items = keys.map(k=>{try{return JSON.parse(localStorage.getItem(k));}catch{return null;}}).filter(Boolean);
@@ -711,7 +714,29 @@ function MainApp({ password }) {
   const clearAll = () => { history.forEach(i=>localStorage.removeItem(i.id)); setHistory([]); };
   const loadHistory = item => { setResult(item.fullResult); setContent(item.contentSnippet||""); setTab("overview"); };
   const logout = () => { localStorage.removeItem(AUTH_KEY); window.location.reload(); };
-
+const fetchUrl = async () => {
+  if (!urlInput.trim()) return;
+  setFetchingUrl(true); setFetchError(null); setContent("");
+  try {
+    const res = await fetch("/api/fetch-url", {
+      method: "POST",
+      headers: { "Content-Type":"application/json", "x-app-password": password },
+      body: JSON.stringify({ url: urlInput.trim() }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      setFetchError(data.error || "Failed to fetch page");
+    } else {
+      setContent(data.text);
+      if (data.wasTrimmed) {
+        setFetchError(`Page was large — analysing first 3,000 words of ${data.wordCount} total`);
+      }
+    }
+  } catch (e) {
+    setFetchError("Network error — " + e.message);
+  }
+  setFetchingUrl(false);
+};
   const analyze = async () => {
     if (!content.trim()) return;
     const cur = getUsage();
@@ -852,36 +877,78 @@ try {
 
       <div style={{ maxWidth:1000, margin:"0 auto", padding:"32px 24px" }}>
 
-        {/* Input section */}
-        <div style={{ marginBottom:28 }}>
-          <h1 style={{ fontFamily:"'Sora',sans-serif", fontSize:26, fontWeight:800, color:C.text, marginBottom:6, letterSpacing:-.5 }}>AI Content Audit</h1>
-          <p style={{ fontSize:13, color:C.muted, marginBottom:20, lineHeight:1.7 }}>Searches live for the latest SEO, AEO, and GEO best practices before every audit. Scores and history saved automatically.</p>
+       {/* Input section */}
+<div style={{ marginBottom:28 }}>
+  <h1 style={{ fontFamily:"'Sora',sans-serif", fontSize:26, fontWeight:800, color:C.text, marginBottom:6, letterSpacing:-.5 }}>AI Content Audit</h1>
+  <p style={{ fontSize:13, color:C.muted, marginBottom:20, lineHeight:1.7 }}>Analyse any page by URL or paste your content directly. Scores and history saved automatically.</p>
 
-          {limitReached && (
-            <div style={{ background:`${C.amber}15`, border:`1px solid ${C.amber}30`, borderRadius:10, padding:"12px 16px", marginBottom:16, fontSize:13, color:C.amber, display:"flex", alignItems:"center", gap:10 }}>
-              <span>⚠</span> Daily limit reached — resets at midnight.
-            </div>
-          )}
+  {limitReached && (
+    <div style={{ background:`${C.amber}15`, border:`1px solid ${C.amber}30`, borderRadius:10, padding:"12px 16px", marginBottom:16, fontSize:13, color:C.amber, display:"flex", alignItems:"center", gap:10 }}>
+      <span>⚠</span> Daily limit reached — resets at midnight.
+    </div>
+  )}
 
-          <div style={{ position:"relative" }}>
-            <textarea value={content} onChange={e=>setContent(e.target.value)}
-              placeholder="Paste your content here — blog posts, landing pages, articles, product descriptions..."
-              rows={9} disabled={limitReached}
-              style={{ width:"100%", background:C.surface, border:`1px solid ${C.border}`, borderRadius:12, padding:"18px 20px", fontSize:13, color:limitReached?C.muted:C.text, lineHeight:1.8, fontFamily:"inherit", transition:"all .2s", cursor:limitReached?"not-allowed":"text", resize:"none" }}
-            />
-            <div style={{ position:"absolute", bottom:14, right:16, fontSize:11, color:C.border2, fontWeight:600 }}>
-              {content.trim().split(/\s+/).filter(Boolean).length} words
-            </div>
-          </div>
+  {/* Mode toggle */}
+  <div style={{ display:"flex", gap:0, background:C.surface, border:`1px solid ${C.border}`, borderRadius:10, padding:4, marginBottom:16, width:"fit-content" }}>
+    {[["url","🔗 Fetch by URL"],["text","📋 Paste Text"]].map(([mode, label]) => (
+      <button key={mode} onClick={() => { setInputMode(mode); setFetchError(null); }}
+        style={{ background: inputMode===mode ? C.surface2 : "none", border: inputMode===mode ? `1px solid ${C.border2}` : "1px solid transparent", borderRadius:8, padding:"8px 18px", cursor:"pointer", fontFamily:"inherit", fontSize:12, fontWeight: inputMode===mode ? 700 : 500, color: inputMode===mode ? C.text : C.muted, transition:"all .15s" }}>
+        {label}
+      </button>
+    ))}
+  </div>
 
-          <div style={{ marginTop:14, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-            <div style={{ fontSize:12, color:C.muted }}>{history.length>0 && `${history.length} analysis${history.length>1?"es":""} in history`}</div>
-            <button onClick={analyze} disabled={!content.trim()||loading||limitReached} className="run-btn"
-              style={{ background:content.trim()&&!loading&&!limitReached?`linear-gradient(135deg,${C.blue},${C.indigo})`:C.surface2, color:content.trim()&&!loading&&!limitReached?"#fff":C.muted, border:"none", borderRadius:10, padding:"12px 28px", fontSize:13, fontWeight:700, cursor:content.trim()&&!loading&&!limitReached?"pointer":"not-allowed", fontFamily:"inherit", boxShadow:content.trim()&&!loading&&!limitReached?`0 4px 20px ${C.blue}40`:"none" }}>
-              {loading ? "Analysing..." : "Run Live Audit →"}
-            </button>
-          </div>
+  {/* URL input mode */}
+  {inputMode === "url" && (
+    <div style={{ marginBottom:0 }}>
+      <div style={{ display:"flex", gap:10, marginBottom: fetchError ? 10 : 0 }}>
+        <input
+          value={urlInput}
+          onChange={e => { setUrlInput(e.target.value); setFetchError(null); }}
+          onKeyDown={e => e.key === "Enter" && fetchUrl()}
+          placeholder="https://yourwebsite.com/page-to-analyse"
+          disabled={fetchingUrl || limitReached}
+          style={{ flex:1, background:C.surface, border:`1px solid ${C.border}`, borderRadius:10, padding:"13px 16px", fontSize:13, color:C.text, fontFamily:"inherit", transition:"all .2s", outline:"none" }}
+        />
+        <button onClick={fetchUrl} disabled={!urlInput.trim() || fetchingUrl || limitReached}
+          style={{ background: urlInput.trim()&&!fetchingUrl&&!limitReached ? C.blue : C.surface2, color: urlInput.trim()&&!fetchingUrl&&!limitReached ? "#fff" : C.muted, border:"none", borderRadius:10, padding:"13px 20px", fontSize:13, fontWeight:700, cursor: urlInput.trim()&&!fetchingUrl&&!limitReached ? "pointer" : "not-allowed", fontFamily:"inherit", whiteSpace:"nowrap", transition:"all .2s" }}>
+          {fetchingUrl ? "Fetching..." : "Fetch Page →"}
+        </button>
+      </div>
+      {fetchError && (
+        <div style={{ background:`${C.red}15`, border:`1px solid ${C.red}30`, borderRadius:8, padding:"10px 14px", fontSize:12, color:C.red, marginTop:10 }}>{fetchError}</div>
+      )}
+      {content && inputMode === "url" && (
+        <div style={{ background:`${C.green}15`, border:`1px solid ${C.green}30`, borderRadius:8, padding:"10px 14px", fontSize:12, color:C.green, marginTop:10, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+          <span>✓ Page fetched — {content.trim().split(/\s+/).filter(Boolean).length} words extracted</span>
+          <button onClick={() => { setContent(""); setUrlInput(""); }} style={{ background:"none", border:"none", color:C.muted, cursor:"pointer", fontSize:11, fontFamily:"inherit" }}>Clear</button>
         </div>
+      )}
+    </div>
+  )}
+
+  {/* Text paste mode */}
+  {inputMode === "text" && (
+    <div style={{ position:"relative" }}>
+      <textarea value={content} onChange={e=>setContent(e.target.value)}
+        placeholder="Paste your content here — blog posts, landing pages, articles, product descriptions..."
+        rows={9} disabled={limitReached}
+        style={{ width:"100%", background:C.surface, border:`1px solid ${C.border}`, borderRadius:12, padding:"18px 20px", fontSize:13, color:limitReached?C.muted:C.text, lineHeight:1.8, fontFamily:"inherit", transition:"all .2s", cursor:limitReached?"not-allowed":"text", resize:"none", outline:"none" }}
+      />
+      <div style={{ position:"absolute", bottom:14, right:16, fontSize:11, color:C.border2, fontWeight:600 }}>
+        {content.trim().split(/\s+/).filter(Boolean).length} words
+      </div>
+    </div>
+  )}
+
+  <div style={{ marginTop:14, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+    <div style={{ fontSize:12, color:C.muted }}>{history.length>0 && `${history.length} analysis${history.length>1?"es":""} in history`}</div>
+    <button onClick={analyze} disabled={!content.trim()||loading||limitReached} className="run-btn"
+      style={{ background:content.trim()&&!loading&&!limitReached?`linear-gradient(135deg,${C.blue},${C.indigo})`:C.surface2, color:content.trim()&&!loading&&!limitReached?"#fff":C.muted, border:"none", borderRadius:10, padding:"12px 28px", fontSize:13, fontWeight:700, cursor:content.trim()&&!loading&&!limitReached?"pointer":"not-allowed", fontFamily:"inherit", boxShadow:content.trim()&&!loading&&!limitReached?`0 4px 20px ${C.blue}40`:"none" }}>
+      {loading ? "Analysing..." : "Run Live Audit →"}
+    </button>
+  </div>
+</div>
 
         {/* Loading */}
         {loading && (
