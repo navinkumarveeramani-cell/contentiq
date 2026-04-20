@@ -1,11 +1,4 @@
-// Node.js runtime — 60 second timeout (vs 10s on Edge)
 export const config = { maxDuration: 60 };
-
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, x-app-password, x-usage-date, x-usage-count",
-};
 
 const ANALYSIS_PROMPT = `You are an expert SEO, AEO and LLM content strategist for 2026. Analyse the content and return ONLY a JSON object — no markdown, no backticks, starting with { and ending with }.
 
@@ -62,7 +55,6 @@ Return this exact structure:
 }`;
 
 export default async function handler(req, res) {
-  // CORS headers
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-app-password, x-usage-date, x-usage-count");
@@ -82,52 +74,40 @@ export default async function handler(req, res) {
   const usageCount = parseInt(req.headers["x-usage-count"] || "0", 10);
   const todayDate  = new Date().toISOString().slice(0, 10);
   if (usageDate === todayDate && usageCount >= limit) {
-    res.status(429).json({ error: "daily_limit_reached", message: `Daily limit of ${limit} reached. Resets at midnight.` });
+    res.status(429).json({ error: "daily_limit_reached", message: `Daily limit of ${limit} reached.` });
     return;
   }
 
-  const body        = req.body;
-  const userContent = body?.messages?.[0]?.content || "";
-
-  const geminiRequest = {
-    contents: [{
-      role: "user",
-      parts: [{ text: `${ANALYSIS_PROMPT}\n\nContent to analyse:\n\n${userContent}\n\nReturn only the JSON object, starting with { and ending with }:` }]
-    }],
-    generationConfig: {
-      maxOutputTokens: 8192,
-      temperature: 0.1,
-    },
-  };
-
-  const apiKey = process.env.GEMINI_API_KEY;
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+  const userContent = req.body?.messages?.[0]?.content || "";
 
   try {
-    const geminiRes = await fetch(url, {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(geminiRequest),
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": process.env.ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 8192,
+        messages: [{
+          role: "user",
+          content: `${ANALYSIS_PROMPT}\n\nContent to analyse:\n\n${userContent}\n\nReturn only the JSON object:`
+        }],
+      }),
     });
 
-    const rawText = await geminiRes.text();
+    const data = await response.json();
 
-    let data;
-    try { data = JSON.parse(rawText); }
-    catch {
-      res.status(502).json({ error: "parse_error", message: rawText.slice(0, 200) });
+    if (!response.ok) {
+      res.status(502).json({ error: "claude_error", message: data?.error?.message });
       return;
     }
 
-    if (!geminiRes.ok) {
-      res.status(502).json({ error: "gemini_error", message: data?.error?.message });
-      return;
-    }
+    let text = data.content?.filter(c => c.type === "text")?.map(c => c.text)?.join("") || "";
 
-    let text = data.candidates?.[0]?.content?.parts
-      ?.filter(p => p.text)?.map(p => p.text)?.join("") || "";
-
-    // Strip markdown fences
+    // Strip any markdown fences just in case
     text = text
       .replace(/^```json\s*/i, "")
       .replace(/^```\s*/i, "")
